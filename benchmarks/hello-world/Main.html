@@ -1,0 +1,27 @@
+<p>hello {{name}}!</p>
+
+<script>
+	const names = [
+		'alice',
+		'bob',
+		'charles'
+	];
+
+	let i = 0;
+
+	export default {
+		data () {
+			return {
+				name: names[i]
+			}
+		},
+
+		methods: {
+			run () {
+				i += 1;
+				i %= names.length;
+				this.set({ name: names[i] });
+			}
+		}
+	};
+</script>

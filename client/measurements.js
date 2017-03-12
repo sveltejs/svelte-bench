@@ -6,6 +6,12 @@ export default [
 		id: 'create:warm'
 	},
 	{
+		id: 'run:cold'
+	},
+	{
+		id: 'run:warm'
+	},
+	{
 		id: 'destroy:cold'
 	},
 	{

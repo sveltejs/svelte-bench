@@ -58,8 +58,6 @@
 		return arr.reduce( ( total, num ) => total + num, 0 );
 	}
 
-	const runScript = get( '/run-test.js' );
-
 	const results = {};
 	benchmarks.forEach( benchmark => {
 		results[ benchmark ] = {};
@@ -117,19 +115,22 @@
 				let childWindow = window.open( 'about:blank', 'svelte-bench', 'width=500,height=500' );
 
 				sequence( combinations, ({ version, benchmark }) => {
-					return get( `/benchmarks/${benchmark}/${version}.js` )
-						.then( benchScript => {
-							const script = 'script';
+					const messages = [];
+
+					results[ benchmark ][ version ] = {};
+
+					return get( `/benchmarks/${benchmark}/${version}.json` )
+						.then( json => {
+							const data = JSON.parse( json );
+							results[ benchmark ][ version ].size = data.size;
 
 							const base64 = btoa( `<body>
 								<script>
-									${benchScript}
+									${data.code}
 
 									(${createAndDestroy}());
-								</${script}>
+								</${'script'}>
 							</body>` );
-
-							const messages = [];
 
 							return new Promise( ( fulfil, reject ) => {
 								let remaining = this.get( 'iterations' );
@@ -160,21 +161,17 @@
 								run();
 							});
 						})
-						.then( messages => {
-							results[ benchmark ][ version ] = {
-								error: null,
-								measurements: {}
-							};
+						.then( () => {
+							results[ benchmark ][ version ].error = null;
+							results[ benchmark ][ version ].measurements = {};
 
 							measurements.forEach( measurement => {
 								results[ benchmark ][ version ].measurements[ measurement.id ] = analyse( messages, measurement );
 							});
 						})
 						.catch( error => {
-							results[ benchmark ][ version ] = {
-								error,
-								measurements: null
-							};
+							results[ benchmark ][ version ].error = error;
+							results[ benchmark ][ version ].measurements = null;
 						})
 						.then( () => {
 							this.set({ results });

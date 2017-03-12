@@ -21,17 +21,17 @@
 </table>
 
 <script>
-	const length = 10;
-	const rows = new Array( length );
+	var length = 1000;
+	var rows = new Array( length );
 
-	for ( let i = 0; i < length; i += 1 ) {
+	for ( var i = 0; i < length; i += 1 ) {
 		rows[i] = [ Math.random(), Math.random(), Math.random(), Math.random() ];
 	}
 
 	export default {
-		data () {
+		data: function () {
 			return {
-				rows
+				rows: rows
 			};
 		}
 	};

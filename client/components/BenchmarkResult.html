@@ -5,6 +5,7 @@
 		<thead>
 			<tr>
 				<th>version</th>
+				<th>size</th>
 				{{#each measurements as measurement}}
 					<th>{{measurement.id}}</th>
 				{{/each}}
@@ -15,6 +16,7 @@
 			{{#each rows as row}}
 				<tr>
 					<td><a href='/benchmarks/{{benchmark}}/{{row.version}}.js'>{{row.version}}</a></td>
+					<td>{{row.size}}</td>
 					{{#each row.measurements as cell}}
 						<td class='bar-outer'>
 							<div class='bar-inner' style='width: {{cell.pc}}%; background-color: {{cell.color}};'></div>
@@ -32,6 +34,10 @@
 		width: 100%;
 		font-size: 12px;
 		border-spacing: 0;
+	}
+
+	th, td {
+		text-align: left;
 	}
 
 	.bar-outer {
@@ -99,6 +105,7 @@
 				return filtered.map( version => {
 					return {
 						version,
+						size: results[ version ].size,
 						measurements: measurements.map( measurement => {
 							const range = ranges[ measurement.id ];
 							const { median } = results[ version ].measurements[ measurement.id ];

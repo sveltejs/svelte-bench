@@ -1,3 +1,4 @@
+/*global Component */
 export function createAndDestroy () {
 	if ( window.error ) {
 		window.opener.postMessage({
@@ -8,47 +9,79 @@ export function createAndDestroy () {
 		window.opener.postMessage({
 			type: 'done'
 		}, '*' );
-	} else {
-		const now = () => window.performance.now();
 
-		/* COLD */
+		return;
+	}
 
-		// component create
-		let t = now();
-		let component = new Component({
-			target: document.body
-		});
-		let duration = now() - t;
+	const now = () => window.performance.now();
+	const wait = window.setImmediate ?
+		() => new Promise( fulfil => setImmediate( fulfil ) ) :
+		() => new Promise( fulfil => setTimeout( fulfil, 0 ) );
 
-		window.opener.postMessage({
-			type: 'create:cold',
-			value: duration
-		}, '*' );
+	function runCold () {
+		let component;
 
-		// component destroy
-		t = now();
-		if ( component.destroy ) {
-			component.destroy();
-		} else {
-			component.teardown();
-		}
-		duration = now() - t;
+		return Promise.resolve()
+			.then( () => {
+				// component create
+				const t = now();
+				component = new Component({
+					target: document.body
+				});
+				const duration = now() - t;
 
-		window.opener.postMessage({
-			type: 'destroy:cold',
-			value: duration
-		}, '*' );
+				window.opener.postMessage({
+					type: 'create:cold',
+					value: duration
+				}, '*' );
+			})
+			.then( wait )
+			.then( () => {
+				// component run
+				let duration = 0;
 
-		/* WARM */
+				if ( component.run ) {
+					const t = now();
+					component.run();
+					duration = now() - t;
+				}
 
-		const iterations = 100;
+				window.opener.postMessage({
+					type: 'run:cold',
+					value: duration
+				}, '*' );
+			})
+			.then( wait )
+			.then( () => {
+				// component destroy
+				const t = now();
+				if ( component.destroy ) {
+					component.destroy();
+				} else {
+					component.teardown();
+				}
+				const duration = now() - t;
+
+				window.opener.postMessage({
+					type: 'destroy:cold',
+					value: duration
+				}, '*' );
+			});
+	}
+
+	function runWarm () {
+		const iterations = 5;
 
 		// warm up
-		let i = 100;
+		let i = 50;
 		while ( i-- ) {
-			component = new Component({
+			const component = new Component({
 				target: document.body
 			});
+
+			if ( component.run ) {
+				component.run();
+			}
 
 			if ( component.destroy ) {
 				component.destroy();
@@ -61,36 +94,66 @@ export function createAndDestroy () {
 		i = iterations;
 
 		let createTotal = 0;
+		let runTotal = 0;
 		let destroyTotal = 0;
 
-		while ( i-- ) {
-			t = now();
-			component = new Component({
-				target: document.body
-			});
-			createTotal += now() - t;
+		function go () {
+			let component;
 
-			t = now();
-			if ( component.destroy ) {
-				component.destroy();
-			} else {
-				component.teardown();
-			}
-			destroyTotal += now() - t;
+			return Promise.resolve()
+				.then( () => {
+					const t = now();
+					component = new Component({
+						target: document.body
+					});
+					createTotal += now() - t;
+				})
+				.then( wait )
+				.then( () => {
+					if ( component.run ) {
+						const t = now();
+						component.run();
+						runTotal += now() - t;
+					}
+				})
+				.then( wait )
+				.then( () => {
+					const t = now();
+					if ( component.destroy ) {
+						component.destroy();
+					} else {
+						component.teardown();
+					}
+					destroyTotal += now() - t;
+				})
+				.then( () => {
+					if ( --i > 0 ) return go();
+				});
 		}
 
-		window.opener.postMessage({
-			type: 'create:warm',
-			value: createTotal / iterations
-		}, '*' );
+		return go().then( () => {
+			window.opener.postMessage({
+				type: 'create:warm',
+				value: createTotal / iterations
+			}, '*' );
 
-		window.opener.postMessage({
-			type: 'destroy:warm',
-			value: destroyTotal / iterations
-		}, '*' );
+			window.opener.postMessage({
+				type: 'run:warm',
+				value: runTotal / iterations
+			}, '*' );
 
-		window.opener.postMessage({
-			type: 'done'
-		}, '*' );
+			window.opener.postMessage({
+				type: 'destroy:warm',
+				value: destroyTotal / iterations
+			}, '*' );
+		});
 	}
+
+	runCold()
+		.then( runWarm )
+		.then( () => {
+			window.opener.postMessage({
+				type: 'done'
+			}, '*' );
+		});
 }
