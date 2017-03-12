@@ -1,0 +1,117 @@
+<div class='benchmark-result'>
+	<h2>{{benchmark}}</h2>
+
+	<table class='measurement'>
+		<thead>
+			<tr>
+				<th>version</th>
+				{{#each measurements as measurement}}
+					<th>{{measurement.id}}</th>
+				{{/each}}
+			</tr>
+		</thead>
+
+		<tbody>
+			{{#each rows as row}}
+				<tr>
+					<td><a href='/benchmarks/{{benchmark}}/{{row.version}}.js'>{{row.version}}</a></td>
+					{{#each row.measurements as cell}}
+						<td class='bar-outer'>
+							<div class='bar-inner' style='width: {{cell.pc}}%; background-color: {{cell.color}};'></div>
+							<span class='label'>{{cell.label}}</span>
+						</td>
+					{{/each}}
+				</tr>
+			{{/each}}
+		</tbody>
+	</table>
+</div>
+
+<style>
+	table {
+		width: 100%;
+		font-size: 12px;
+		border-spacing: 0;
+	}
+
+	.bar-outer {
+		position: relative;
+		padding: 0.2em 3em 0.2em 0;
+	}
+
+	.bar-inner {
+		height: 0.6em;
+		background-color: red;
+	}
+
+	.label {
+		position: absolute;
+		top: 0em;
+		right: 0.5em;
+	}
+
+	tr:hover {
+		background-color: #eee;
+	}
+</style>
+
+<script>
+	import chroma from 'chroma-js';
+	import versions from '../versions.js';
+	import measurements from '../measurements.js';
+
+	export default {
+		data () {
+			return {
+				measurements,
+				versions
+			};
+		},
+
+		computed: {
+			rows ( results ) {
+				const ranges = {};
+				measurements.forEach( measurement => {
+					ranges[ measurement.id ] = {
+						min: Infinity,
+						max: -Infinity,
+						color: null
+					};
+				});
+
+				const filtered = versions.filter( version => results[ version ].measurements );
+
+				filtered.forEach( version => {
+					measurements.forEach( measurement => {
+						const range = ranges[ measurement.id ];
+						const median = results[ version ].measurements[ measurement.id ].median;
+
+						if ( median < range.min ) range.min = median;
+						if ( median > range.max ) range.max = median;
+					});
+				});
+
+				measurements.forEach( measurement => {
+					const range = ranges[ measurement.id ];
+					range.color = chroma.scale([ '#FF4136', '#2ECC40' ]).mode( 'lab' ).domain([ range.max, range.min ]);
+				});
+
+				return filtered.map( version => {
+					return {
+						version,
+						measurements: measurements.map( measurement => {
+							const range = ranges[ measurement.id ];
+							const { median } = results[ version ].measurements[ measurement.id ];
+
+							return {
+								pc: 100 * median / range.max,
+								label: median.toFixed( 2 ),
+								color: range.color( median )
+							};
+						})
+					};
+				});
+			}
+		}
+	};
+</script>

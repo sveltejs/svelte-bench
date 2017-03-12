@@ -1,0 +1,22 @@
+<div class='results'>
+	{{#each benchmarks as benchmark}}
+		<BenchmarkResult benchmark='{{benchmark}}' results='{{results[ benchmark ]}}'/>
+	{{/each}}
+</div>
+
+<script>
+	import benchmarks from '../benchmarks.js';
+	import BenchmarkResult from './BenchmarkResult.html';
+
+	export default {
+		data () {
+			return {
+				benchmarks
+			};
+		},
+
+		components: {
+			BenchmarkResult
+		}
+	};
+</script>

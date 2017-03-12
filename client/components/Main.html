@@ -1,0 +1,192 @@
+<select bind:value='selectedBenchmark'>
+	<option value='*'>run all benchmarks</option>
+
+	{{#each benchmarks as benchmark}}
+		<option>{{benchmark}}</option>
+	{{/each}}
+</select>
+
+<select multiple bind:value='selectedVersions'>
+	<!--<option value='*'>all versions</option>-->
+
+	{{#each versions as version}}
+		<option>{{version}}</option>
+	{{/each}}
+</select>
+
+<label>
+	<input type='range' bind:value='iterations' min='5' max='50'> {{iterations}} iterations
+</label>
+
+<button on:click='go()'>go</button>
+
+<Results results='{{results}}'/>
+
+<style>
+	select[multiple] {
+		width: 100px;
+		height: 300px;
+	}
+</style>
+
+<script>
+	import { createAndDestroy } from '../run.js';
+	import Results from './Results.html';
+	import versions from '../versions.js';
+	import benchmarks from '../benchmarks.js';
+	import measurements from '../measurements.js';
+
+	function sequence ( array, fn ) {
+		return array.reduce( ( promise, item ) => {
+			return promise.then( () => Promise.resolve( fn( item ) ) );
+		}, Promise.resolve() );
+	}
+
+	function get ( url ) {
+		return new Promise( ( fulfil, reject ) => {
+			const xhr = new XMLHttpRequest();
+			xhr.onerror = reject;
+			xhr.onload = () => fulfil( xhr.responseText );
+			xhr.open( 'GET', url );
+			xhr.send();
+		});
+	}
+
+	const now = window.performance ? () => window.performance.now() : () => Date.now();
+
+	function sum ( arr ) {
+		return arr.reduce( ( total, num ) => total + num, 0 );
+	}
+
+	const runScript = get( '/run-test.js' );
+
+	const results = {};
+	benchmarks.forEach( benchmark => {
+		results[ benchmark ] = {};
+		versions.forEach( version => {
+			results[ benchmark ][ version ] = {};
+		});
+	});
+
+	function analyse ( messages, measurement ) {
+		const filtered = messages
+			.filter( message => message.type === measurement.id )
+			.sort( ( a, b ) => a.value - b.value );
+
+		const mid = filtered.length >> 1;
+		const median = filtered.length % 2 ? filtered[ mid ].value : ( filtered[ mid ].value + filtered[ mid - 1 ].value ) / 2;
+
+		return {
+			min: filtered[0].value,
+			max: filtered[ filtered.length - 1 ].value,
+			median
+		};
+	}
+
+	export default {
+		data () {
+			return {
+				versions,
+				selectedVersion: versions[0],
+				selectedVersions: [ versions[0] ],
+				benchmarks,
+				selectedBenchmark: '*',
+
+				iterations: 5,
+
+				results
+			};
+		},
+
+		methods: {
+			go () {
+				const versions = this.get( 'selectedVersions' );
+				const benchmark = this.get( 'selectedBenchmark' );
+
+				// const versions = version === '*' ? this.get( 'versions' ) : [ version ];
+				const benchmarks = benchmark === '*' ? this.get( 'benchmarks' ) : [ benchmark ];
+
+				const combinations = [];
+
+				benchmarks.forEach( benchmark => {
+					versions.forEach( version => {
+						combinations.push({ version, benchmark })
+					});
+				});
+
+				let childWindow = window.open( 'about:blank', 'svelte-bench', 'width=500,height=500' );
+
+				sequence( combinations, ({ version, benchmark }) => {
+					return get( `/benchmarks/${benchmark}/${version}.js` )
+						.then( benchScript => {
+							const script = 'script';
+
+							const base64 = btoa( `<body>
+								<script>
+									${benchScript}
+
+									(${createAndDestroy}());
+								</${script}>
+							</body>` );
+
+							const messages = [];
+
+							return new Promise( ( fulfil, reject ) => {
+								let remaining = this.get( 'iterations' );
+
+								window.addEventListener( 'message', function handleMessage ( event ) {
+									if ( event.data.type === 'error' ) {
+										console.error( event.data.message );
+										window.removeEventListener( 'message', handleMessage );
+										childWindow.close();
+										reject( event.data.message );
+									} else if ( event.data.type === 'done' ) {
+										if ( --remaining === 0 ) {
+											window.removeEventListener( 'message', handleMessage );
+											childWindow.close();
+											fulfil( messages );
+										} else {
+											requestAnimationFrame( run );
+										}
+									} else {
+										messages.push( event.data );
+									}
+								});
+
+								function run () {
+									childWindow = window.open( `data:text/html;base64,${base64}`, 'svelte-bench', 'width=500,height=500' );
+								}
+
+								run();
+							});
+						})
+						.then( messages => {
+							results[ benchmark ][ version ] = {
+								error: null,
+								measurements: {}
+							};
+
+							measurements.forEach( measurement => {
+								results[ benchmark ][ version ].measurements[ measurement.id ] = analyse( messages, measurement );
+							});
+						})
+						.catch( error => {
+							results[ benchmark ][ version ] = {
+								error,
+								measurements: null
+							};
+						})
+						.then( () => {
+							this.set({ results });
+						});
+				}).then( () => {
+					childWindow.close();
+				});
+			}
+		},
+
+		components: {
+			Results
+		}
+	};
+</script>
