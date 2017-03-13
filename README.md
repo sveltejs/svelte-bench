@@ -10,7 +10,7 @@ You must have [Yarn](https://yarnpkg.com) installed.
 git clone https://github.com/sveltejs/svelte-bench
 cd svelte-bench
 yarn
-npm start
+yarn start
 ```
 
 Navigate to [localhost:3000](http://localhost:3000).
