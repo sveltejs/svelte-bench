@@ -119,7 +119,7 @@
 
 					results[ benchmark ][ version ] = {};
 
-					return get( `/benchmarks/${benchmark}/${version}.json` )
+					return get( `/benchmarks/${benchmark}/${version}/component.json` )
 						.then( json => {
 							const data = JSON.parse( json );
 							results[ benchmark ][ version ].size = data.size;
