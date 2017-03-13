@@ -4,10 +4,11 @@
   "description": "Svelte benchmarks",
   "main": "index.js",
   "scripts": {
-    "start": "npm run build:benchmarks && node server",
+    "start": "npm run build:benchmarks && npm run build:client && node server",
     "build:client": "rollup -c",
-    "dev": "rollup -c -w",
     "build:benchmarks": "node scripts/build",
+    "postinstall": "node scripts/install",
+    "dev": "rollup -c -w",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
