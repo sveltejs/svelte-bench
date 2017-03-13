@@ -4,7 +4,7 @@ Benchmarks for [Svelte](https://svelte.technology). Work-in-progress.
 
 ## Running the benchmarks
 
-You must to have [Yarn](https://yarnpkg.com) installed.
+You must have [Yarn](https://yarnpkg.com) installed.
 
 ```bash
 git clone https://github.com/sveltejs/svelte-bench
