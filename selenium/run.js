@@ -52,7 +52,7 @@ function run() {
 
 	const time = Date.now();
 	Promise.all(browsers.map(browser => {
-		console.log('Starting browser', browser');
+		console.log('Starting browser', browser);
 		let driverInstance;
 		return new Builder()
 			.forBrowser(browser)
