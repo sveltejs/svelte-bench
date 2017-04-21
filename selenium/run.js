@@ -52,7 +52,8 @@ function run() {
 
 	const time = Date.now();
 	Promise.all(browsers.map(browser => {
-		let driverInstance
+		console.log('Starting browser', browser');
+		let driverInstance;
 		return new Builder()
 			.forBrowser(browser)
 			.build()
@@ -165,6 +166,7 @@ function run() {
 				try {
 					driverInstance.quit(); // could've been called before, but let's just make sure
 				} catch (err) { }
+				throw err;
 			})
 	})).then(() => console.log(`Took ${(Date.now() - time) / 1000}s.`)).catch(err => {
 		console.error(err);
