@@ -1,16 +1,23 @@
 const fs = require('fs');
-const { Builder, By, until } = require('selenium-webdriver');
+const {Builder, By, until} = require('selenium-webdriver');
 const chalk = require('chalk');
 const minimist = require('minimist');
-const { build } = require('../scripts/build-tools');
+const {build} = require('../scripts/build-tools');
 
 const command = minimist(process.argv.slice(2));
 
-const browsers = command.browsers ? command.browsers.split(',') : ['chrome', 'firefox'];
+const capabilities = command.capabilities ? JSON.parse(command.capabilities) : [];
+const server = command.server || null;
+const browsers = command.browsers ? command.browsers.split(',') : [];
 const iterations = command.iterations ? +command.iterations : 5; // todo configurable
+
 const allVersions = require('../versions.json').map(version => {
 	const split = version.split('.');
-	return { major: +split[0], minor: +split[1], patch: +split[2] };
+	return {
+		major: +split[0],
+		minor: +split[1],
+		patch: +split[2]
+	};
 });
 const benchmarks = fs.readdirSync('benchmarks').filter(d => d[0] !== '.');
 const measurements = require('./measurements');
@@ -34,11 +41,149 @@ if (command.custom) {
 	run();
 }
 
+function createDriver(results, browser, cap) {
+	let driverInstance;
+
+	let builder = new Builder();
+	if (browser) {
+		builder = builder.forBrowser(browser);
+	}
+	if (cap) {
+		builder = builder.withCapabilities(cap);
+	}
+	if (server) {
+		builder = builder.usingServer(server);
+	}
+
+	const capString = `${cap.browserName} ${cap.version} (${cap.platform})`;
+
+	return builder.build()
+		.then(driver => {
+			driverInstance = driver;
+			driver.manage().timeouts().setScriptTimeout(5 * 1000);
+			return sequence(combinations, ({version, benchmark, code, size}) => {
+				console.log('Testing', version, benchmark, 'in', browser || capString);
+
+				results[benchmark][version] = {};
+
+				results[benchmark][version].size = size;
+
+				const base64 = Buffer.from(`<body>
+                        <script>
+                        ${code}
+                        </${'script'}>
+                        </body>`, 'utf8').toString('base64');
+
+				return new Promise((resolve, reject) => {
+					let messages = [];
+					let times = iterations;
+
+					function run() {
+						return driver.get(`data:text/html;base64,${base64}`)
+							.then(() => driver.executeAsyncScript(runCode).catch(err => {
+								if (~err.message.indexOf('Timed out')) {
+									return JSON.stringify({
+										error: 'Timed out'
+									});
+								}
+								throw err;
+							}))
+							.then(res => JSON.parse(res))
+							.then(res => {
+								if (Array.isArray(res)) {
+									messages = messages.concat(res);
+								} else {
+									messages.push(res);
+								}
+								if (--times <= 0) {
+									resolve(messages);
+								} else {
+									run();
+								}
+							}).catch(reject);
+					}
+					run();
+				}).then(messages => {
+					const errors = messages.filter(message => !!message.error);
+					messages = messages.filter(message => !message.error);
+
+					results[benchmark][version].error = errors.map(error => `"${error.error}"`).join(', ');
+					results[benchmark][version].measurements = {};
+
+					measurements.forEach(measurement => {
+						results[benchmark][version].measurements[measurement.id] = analyse(messages, measurement);
+					});
+				});
+			}).then(() => driver.quit()).then(() => {
+				benchmarks.forEach(benchmark => {
+					console.log('\n' + chalk.underline(`${benchmark} (${browser || capString})`) + '\n');
+					const versions = results[benchmark];
+
+					const column = (text, width) => {
+						text = ' ' + text;
+						if (text.length > width) {
+							return ' ..' + text.substr(text.length - width + 3, width);
+						}
+						while (text.length < width) {
+							text = ' ' + text; // I would use the left pad module for this but..
+						}
+						return text;
+					};
+
+					const firstColumnWidth = 15;
+					const dataColumnWidth = 15;
+
+					let measurementsStr = '  ';
+					measurementsStr += column('version', firstColumnWidth);
+					measurements.forEach(measurement => measurementsStr += column(measurement.id, dataColumnWidth));
+					console.log(chalk.inverse(measurementsStr));
+
+					Object.keys(versions).forEach(version => {
+						const data = versions[version];
+						if (data.error) {
+							console.log('  ', column(version, firstColumnWidth), data.error);
+						} else {
+							let rowStr = `  ${column(version, firstColumnWidth)}`;
+							measurements.forEach(measurement => {
+								const measureData = data.measurements[measurement.id];
+								const best = Object.keys(versions)
+										.map(key => versions[key])
+										.filter(other => !other.error)
+										.filter(other => other.measurements[measurement.id].median < measureData.median).length === 0;
+								let median = measureData.median.toFixed(3);
+								let str = column(median, dataColumnWidth);
+								;
+
+								if (best) {
+									str = str.replace(median, chalk.bgGreen(median)); // `column` counts color codes in length
+								}
+
+								rowStr += str;
+							});
+							console.log(rowStr);
+						}
+					});
+					console.log('\n')
+				});
+			});
+		}).catch(err => {
+		try {
+			driverInstance.quit(); // could've been called before, but let's just make sure
+		} catch (err) {}
+		throw err;
+	});
+}
+
 function run() {
 	benchmarks.forEach(benchmark => {
 		versions.forEach(version => {
 			const data = require(`../public/benchmarks/${benchmark}/${version}/component.json`);
-			combinations.push({ version, benchmark, code: data.code, size: data.size })
+			combinations.push({
+				version,
+				benchmark,
+				code: data.code,
+				size: data.size
+			})
 		});
 	});
 
@@ -50,125 +195,24 @@ function run() {
 		});
 	});
 
-	const time = Date.now();
-	Promise.all(browsers.map(browser => {
+	let promise = Promise.resolve();
+
+	browsers.forEach(browser => promise = promise.then(() => {
 		console.log('Starting browser', browser);
-		let driverInstance;
-		return new Builder()
-			.forBrowser(browser)
-			.build()
-			.then(driver => {
-				driverInstance = driver;
-				driver.manage().timeouts().setScriptTimeout(5 * 1000);
-				return sequence(combinations, ({ version, benchmark, code, size }) => {
-					console.log('Testing', version, benchmark, 'in', browser);
+		return createDriver(results, browser, null);
+	}));
 
-					results[benchmark][version] = {};
+	capabilities.forEach(cap => promise = promise.then(() => {
+		console.log('Running capability..');
+		return createDriver(results, null, cap);
+	}));
 
-					results[benchmark][version].size = size;
+	if (browsers.length ^ capabilities.length === 0) {
+		console.warn('No browsers or capabilities were will be ran.');
+	}
 
-					const base64 = Buffer.from(`<body>
-							<script>
-								${code}
-							</${'script'}>
-						</body>`, 'utf8').toString('base64');
-
-					return new Promise((resolve, reject) => {
-						let messages = [];
-						let times = iterations;
-
-						function run() {
-							return driver.get(`data:text/html;base64,${base64}`)
-								.then(() => driver.executeAsyncScript(runCode).catch(err => {
-									if (~err.message.indexOf('Timed out')) {
-										return JSON.stringify({ error: 'Timed out' });
-									}
-									throw err;
-								}))
-								.then(res => JSON.parse(res))
-								.then(res => {
-									if (Array.isArray(res)) {
-										messages = messages.concat(res);
-									} else {
-										messages.push(res);
-									}
-									if (--times <= 0) {
-										resolve(messages);
-									} else {
-										run();
-									}
-								}).catch(reject);
-						}
-						run();
-					}).then(messages => {
-						const errors = messages.filter(message => !!message.error);
-						messages = messages.filter(message => !message.error);
-
-						results[benchmark][version].error = errors.map(error => `"${error.error}"`).join(', ');
-						results[benchmark][version].measurements = {};
-
-						measurements.forEach(measurement => {
-							results[benchmark][version].measurements[measurement.id] = analyse(messages, measurement);
-						});
-					});
-				}).then(() => driver.quit()).then(() => {
-					benchmarks.forEach(benchmark => {
-						console.log('\n' + chalk.underline(`${benchmark} (${browser})`) + '\n');
-						const versions = results[benchmark];
-
-						const column = (text, width) => {
-							text = ' ' + text;
-							if (text.length > width) {
-								return ' ..' + text.substr(text.length - width + 3, width);
-							}
-							while (text.length < width) {
-								text = ' ' + text; // I would use the left pad module for this but..
-							}
-							return text;
-						};
-
-						const firstColumnWidth = 15;
-						const dataColumnWidth = 15;
-
-						let measurementsStr = '  ';
-						measurementsStr += column('version', firstColumnWidth);
-						measurements.forEach(measurement => measurementsStr += column(measurement.id, dataColumnWidth));
-						console.log(chalk.inverse(measurementsStr));
-
-						Object.keys(versions).forEach(version => {
-							const data = versions[version];
-							if (data.error) {
-								console.log('  ', column(version, firstColumnWidth), data.error);
-							} else {
-								let rowStr = `  ${column(version, firstColumnWidth)}`;
-								measurements.forEach(measurement => {
-									const measureData = data.measurements[measurement.id];
-									const best = Object.keys(versions)
-										.map(key => versions[key])
-										.filter(other => !other.error)
-										.filter(other => other.measurements[measurement.id].median < measureData.median).length === 0;
-									let median = measureData.median.toFixed(3);
-									let str = column(median, dataColumnWidth);;
-
-									if (best) {
-										str = str.replace(median, chalk.bgGreen(median)); // `column` counts color codes in length
-									}
-
-									rowStr += str;
-								});
-								console.log(rowStr);
-							}
-						});
-						console.log('\n')
-					});
-				});
-			}).catch(err => {
-				try {
-					driverInstance.quit(); // could've been called before, but let's just make sure
-				} catch (err) { }
-				throw err;
-			})
-	})).then(() => console.log(`Took ${(Date.now() - time) / 1000}s.`)).catch(err => {
+	const time = Date.now();
+	promise.then(() => console.log(`Took ${(Date.now() - time) / 1000}s.`)).catch(err => {
 		console.error(err);
 	});
 }
@@ -184,7 +228,9 @@ function runCode() {
 	const callback = arguments[arguments.length - 1];
 
 	if (window.error) {
-		return callback(JSON.stringify({ error: window.error }));
+		return callback(JSON.stringify({
+			error: window.error
+		}));
 	}
 
 	const results = [];
@@ -330,7 +376,9 @@ function runCode() {
 		.then(() => {
 			callback(JSON.stringify(results));
 		})
-		.catch(err => callback(JSON.stringify({ error: err.message + '\n' + err.stack })));
+		.catch(err => callback(JSON.stringify({
+			error: err.message + '\n' + err.stack
+		})));
 }
 
 function analyse(messages, measurement) {
