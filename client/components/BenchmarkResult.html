@@ -15,7 +15,7 @@
 		<tbody>
 			{{#each rows as row}}
 				<tr>
-					<td><a href='/benchmarks/{{benchmark}}/{{row.version}}.js'>{{row.version}}</a></td>
+					<td><a href='/benchmarks/{{benchmark}}/{{row.version}}/component.js'>{{row.version}}</a></td>
 					<td>{{row.size}}</td>
 					{{#each row.measurements as cell}}
 						<td class='bar-outer'>
