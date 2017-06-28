@@ -10,6 +10,7 @@ const capabilities = command.capabilities ? JSON.parse(command.capabilities) : [
 const server = command.server || null;
 const browsers = command.browsers ? command.browsers.split(',') : [];
 const iterations = command.iterations ? +command.iterations : 5; // todo configurable
+const output = command.output || null;
 
 const allVersions = require('../versions.json').map(version => {
 	const split = version.split('.');
@@ -36,9 +37,13 @@ const combinations = [];
 
 if (command.custom) {
 	build('custom', command.custom, true).then(run);
-	versions.push('custom');
+	versions.unshift('custom');
 } else {
 	run();
+}
+
+if (output && fs.existsSync(output)) {
+    fs.unlinkSync(output);
 }
 
 function createDriver(results, browser, cap) {
@@ -55,14 +60,14 @@ function createDriver(results, browser, cap) {
 		builder = builder.usingServer(server);
 	}
 
-	const capString = `${cap.browserName} ${cap.version} (${cap.platform})`;
+	const capString = browser || `${cap.browserName} ${cap.version} (${cap.platform})`;
 
 	return builder.build()
 		.then(driver => {
 			driverInstance = driver;
 			driver.manage().timeouts().setScriptTimeout(5 * 1000);
 			return sequence(combinations, ({version, benchmark, code, size}) => {
-				console.log('Testing', version, benchmark, 'in', browser || capString);
+				console.log('Testing', version, benchmark, 'in', capString);
 
 				results[benchmark][version] = {};
 
@@ -116,7 +121,8 @@ function createDriver(results, browser, cap) {
 				});
 			}).then(() => driver.quit()).then(() => {
 				benchmarks.forEach(benchmark => {
-					console.log('\n' + chalk.underline(`${benchmark} (${browser || capString})`) + '\n');
+                    output && fs.appendFileSync(output, '\n' + `${benchmark} (${capString})` + '\n');
+					console.log('\n' + chalk.underline(`${benchmark} (${capString})`) + '\n');
 					const versions = results[benchmark];
 
 					const column = (text, width) => {
@@ -136,11 +142,13 @@ function createDriver(results, browser, cap) {
 					let measurementsStr = '  ';
 					measurementsStr += column('version', firstColumnWidth);
 					measurements.forEach(measurement => measurementsStr += column(measurement.id, dataColumnWidth));
+                    output && fs.appendFileSync(output, measurementsStr + '\n');
 					console.log(chalk.inverse(measurementsStr));
 
 					Object.keys(versions).forEach(version => {
 						const data = versions[version];
 						if (data.error) {
+                            output && fs.appendFileSync(output, '  ' + column(version, firstColumnWidth) + ' ' + data.error + '\n');
 							console.log('  ', column(version, firstColumnWidth), data.error);
 						} else {
 							let rowStr = `  ${column(version, firstColumnWidth)}`;
@@ -152,7 +160,6 @@ function createDriver(results, browser, cap) {
 										.filter(other => other.measurements[measurement.id].median < measureData.median).length === 0;
 								let median = measureData.median.toFixed(3);
 								let str = column(median, dataColumnWidth);
-								;
 
 								if (best) {
 									str = str.replace(median, chalk.bgGreen(median)); // `column` counts color codes in length
@@ -160,9 +167,11 @@ function createDriver(results, browser, cap) {
 
 								rowStr += str;
 							});
+                            output && fs.appendFileSync(output, chalk.stripColor(rowStr) + '\n');
 							console.log(rowStr);
 						}
 					});
+                    output && fs.appendFileSync(output, '\n');
 					console.log('\n')
 				});
 			});
