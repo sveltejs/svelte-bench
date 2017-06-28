@@ -9,7 +9,7 @@ const relative = require( 'require-relative' );
 const benchmarks = sander.readdirSync( 'benchmarks' ).filter( d => d[0] !== '.' );
 
 module.exports.build = function ( version, dir, custom ) {
-	const svelte = relative( 'svelte', dir );
+	const svelte = path.basename( dir ) === 'svelte' ? require(dir) : relative( 'svelte', dir );
 
     let promise = Promise.resolve();
 	benchmarks.forEach( benchmark => {
