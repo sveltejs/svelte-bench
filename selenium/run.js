@@ -9,7 +9,7 @@ const command = minimist(process.argv.slice(2));
 const capabilities = command.capabilities ? JSON.parse(command.capabilities) : [];
 const server = command.server || null;
 const browsers = command.browsers ? command.browsers.split(',') : [];
-const iterations = command.iterations ? +command.iterations : 5; // todo configurable
+const iterations = command.iterations ? +command.iterations : 5;
 const output = command.output || null;
 
 const allVersions = require('../versions.json').map(version => {
@@ -27,7 +27,7 @@ const versions = [];
 allVersions.forEach(version => {
 	if (versions.length < 5) {
 		versions.push(`${version.major}.${version.minor}.${version.patch}`);
-	} else if (allVersions.filter(other => other.major === version.major && other.minor === version.minor && other.patch > version.patch).length === 0) {
+	} else if (versions.length < 10 && allVersions.filter(other => other.major === version.major && other.minor === version.minor && other.patch > version.patch).length === 0) {
 		versions.push(`${version.major}.${version.minor}.${version.patch}`);
 	}
 });
@@ -162,7 +162,7 @@ function createDriver(results, browser, cap) {
 								let str = column(median, dataColumnWidth);
 
 								if (best) {
-									str = str.replace(median, chalk.bgGreen(median)); // `column` counts color codes in length
+									str = str.replace(median, chalk.black.bgGreen(median)); // `column` counts color codes in length
 								}
 
 								rowStr += str;
@@ -301,10 +301,8 @@ function runCode() {
 	}
 
 	function runWarm() {
-		const iterations = 5;
-
 		// warm up
-		let i = 50;
+		let i = 25;
 		while (i--) {
 			const component = new Component({
 				target: document.body
@@ -322,62 +320,44 @@ function runCode() {
 		}
 
 		// time warm runs
-		i = iterations;
+        let component;
 
-		let createTotal = 0;
-		let runTotal = 0;
-		let destroyTotal = 0;
+        return Promise.resolve()
+            .then(() => {
+                const t = now();
+                component = new Component({
+                    target: document.body
+                });
+                results.push({
+                    type: 'create:warm',
+                    value: now() - t
+                });
+            })
+            .then(wait)
+            .then(() => {
+                const t = now();
+                if (component.run) {
+                    component.run();
+                }
 
-		function go() {
-			let component;
-
-			return Promise.resolve()
-				.then(() => {
-					const t = now();
-					component = new Component({
-						target: document.body
-					});
-					createTotal += now() - t;
-				})
-				.then(wait)
-				.then(() => {
-					if (component.run) {
-						const t = now();
-						component.run();
-						runTotal += now() - t;
-					}
-				})
-				.then(wait)
-				.then(() => {
-					const t = now();
-					if (component.destroy) {
-						component.destroy();
-					} else {
-						component.teardown();
-					}
-					destroyTotal += now() - t;
-				})
-				.then(() => {
-					if (--i > 0) return go();
-				});
-		}
-
-		return go().then(() => {
-			results.push({
-				type: 'create:warm',
-				value: createTotal / iterations
-			});
-
-			results.push({
-				type: 'run:warm',
-				value: runTotal / iterations
-			});
-
-			results.push({
-				type: 'destroy:warm',
-				value: destroyTotal / iterations
-			});
-		});
+                results.push({
+                    type: 'run:warm',
+                    value: now() - t
+                });
+            })
+            .then(wait)
+            .then(() => {
+                const t = now();
+                if (component.destroy) {
+                    component.destroy();
+                } else {
+                    component.teardown();
+                }
+                results.push({
+                    type: 'destroy:warm',
+                    value: now() - t
+                });
+            });
 	}
 
 	runCold()
