@@ -43,143 +43,135 @@ if (command.custom) {
 }
 
 if (output && fs.existsSync(output)) {
-    fs.unlinkSync(output);
+	fs.unlinkSync(output);
 }
 
 function createDriver(results, browser, cap) {
 	let driverInstance;
 
 	let builder = new Builder();
+	if (server) {
+		builder = builder.usingServer(server);
+	}
 	if (browser) {
 		builder = builder.forBrowser(browser);
 	}
 	if (cap) {
 		builder = builder.withCapabilities(cap);
 	}
-	if (server) {
-		builder = builder.usingServer(server);
-	}
 
 	const capString = browser || `${cap.browserName} ${cap.version} (${cap.platform})`;
 
-	return builder.build()
-		.then(driver => {
-			driverInstance = driver;
-			driver.manage().timeouts().setScriptTimeout(5 * 1000);
-			return sequence(combinations, ({version, benchmark, code, size}) => {
-				console.log('Testing', version, benchmark, 'in', capString);
+	driverInstance = builder.build();
+	driverInstance.manage().timeouts().setScriptTimeout(5 * 1000);
+	return sequence(combinations, ({version, benchmark, code, size}) => {
+		console.log('Testing', version, benchmark, 'in', capString);
 
-				results[benchmark][version] = {};
+		results[benchmark][version] = {};
 
-				results[benchmark][version].size = size;
+		results[benchmark][version].size = size;
 
-				const base64 = Buffer.from(`<body>
+		const base64 = Buffer.from(`<body>
                         <script>
                         ${code}
                         </${'script'}>
                         </body>`, 'utf8').toString('base64');
 
-				return new Promise((resolve, reject) => {
-					let messages = [];
-					let times = iterations;
+		return new Promise((resolve, reject) => {
+			let messages = [];
+			let times = iterations;
 
-					function run() {
-						return driver.get(`data:text/html;base64,${base64}`)
-							.then(() => driver.executeAsyncScript(runCode).catch(err => {
-								if (~err.message.indexOf('Timed out')) {
-									return JSON.stringify({
-										error: 'Timed out'
-									});
-								}
-								throw err;
-							}))
-							.then(res => JSON.parse(res))
-							.then(res => {
-								if (Array.isArray(res)) {
-									messages = messages.concat(res);
-								} else {
-									messages.push(res);
-								}
-								if (--times <= 0) {
-									resolve(messages);
-								} else {
-									run();
-								}
-							}).catch(reject);
-					}
-					run();
-				}).then(messages => {
-					const errors = messages.filter(message => !!message.error);
-					messages = messages.filter(message => !message.error);
-
-					results[benchmark][version].error = errors.map(error => `"${error.error}"`).join(', ');
-					results[benchmark][version].measurements = {};
-
-					measurements.forEach(measurement => {
-						results[benchmark][version].measurements[measurement.id] = analyse(messages, measurement);
-					});
-				});
-			}).then(() => driver.quit()).then(() => {
-				benchmarks.forEach(benchmark => {
-                    output && fs.appendFileSync(output, '\n' + `${benchmark} (${capString})` + '\n');
-					console.log('\n' + chalk.underline(`${benchmark} (${capString})`) + '\n');
-					const versions = results[benchmark];
-
-					const column = (text, width) => {
-						text = ' ' + text;
-						if (text.length > width) {
-							return ' ..' + text.substr(text.length - width + 3, width);
-						}
-						while (text.length < width) {
-							text = ' ' + text; // I would use the left pad module for this but..
-						}
-						return text;
-					};
-
-					const firstColumnWidth = 15;
-					const dataColumnWidth = 15;
-
-					let measurementsStr = '  ';
-					measurementsStr += column('version', firstColumnWidth);
-					measurements.forEach(measurement => measurementsStr += column(measurement.id, dataColumnWidth));
-                    output && fs.appendFileSync(output, measurementsStr + '\n');
-					console.log(chalk.inverse(measurementsStr));
-
-					Object.keys(versions).forEach(version => {
-						const data = versions[version];
-						if (data.error) {
-                            output && fs.appendFileSync(output, '  ' + column(version, firstColumnWidth) + ' ' + data.error + '\n');
-							console.log('  ', column(version, firstColumnWidth), data.error);
-						} else {
-							let rowStr = `  ${column(version, firstColumnWidth)}`;
-							measurements.forEach(measurement => {
-								const measureData = data.measurements[measurement.id];
-								const best = Object.keys(versions)
-										.map(key => versions[key])
-										.filter(other => !other.error)
-										.filter(other => other.measurements[measurement.id].median < measureData.median).length === 0;
-								let median = measureData.median.toFixed(3);
-								let str = column(median, dataColumnWidth);
-
-								if (best) {
-									str = str.replace(median, chalk.black.bgGreen(median)); // `column` counts color codes in length
-								}
-
-								rowStr += str;
+			function run() {
+				return driverInstance.get(`data:text/html;base64,${base64}`)
+					.then(() => driverInstance.executeAsyncScript(runCode).catch(err => {
+						if (~err.message.indexOf('Timed out')) {
+							return JSON.stringify({
+								error: 'Timed out'
 							});
-                            output && fs.appendFileSync(output, chalk.stripColor(rowStr) + '\n');
-							console.log(rowStr);
 						}
-					});
-                    output && fs.appendFileSync(output, '\n');
-					console.log('\n')
-				});
+						throw err;
+					}))
+					.then(res => JSON.parse(res))
+					.then(res => {
+						if (Array.isArray(res)) {
+							messages = messages.concat(res);
+						} else {
+							messages.push(res);
+						}
+						if (--times <= 0) {
+							resolve(messages);
+						} else {
+							run();
+						}
+					}).catch(reject);
+			}
+			run();
+		}).then(messages => {
+			const errors = messages.filter(message => !!message.error);
+			messages = messages.filter(message => !message.error);
+
+			results[benchmark][version].error = errors.map(error => `"${error.error}"`).join(', ');
+			results[benchmark][version].measurements = {};
+
+			measurements.forEach(measurement => {
+				results[benchmark][version].measurements[measurement.id] = analyse(messages, measurement);
 			});
-		}).catch(err => {
-		try {
-			driverInstance.quit(); // could've been called before, but let's just make sure
-		} catch (err) {}
-		throw err;
+		});
+	}).then(() => driverInstance.quit()).then(() => {
+		benchmarks.forEach(benchmark => {
+			output && fs.appendFileSync(output, '\n' + `${benchmark} (${capString})` + '\n');
+			console.log('\n' + chalk.underline(`${benchmark} (${capString})`) + '\n');
+			const versions = results[benchmark];
+
+			const column = (text, width) => {
+				text = ' ' + text;
+				if (text.length > width) {
+					return ' ..' + text.substr(text.length - width + 3, width);
+				}
+				while (text.length < width) {
+					text = ' ' + text; // I would use the left pad module for this but..
+				}
+				return text;
+			};
+
+			const firstColumnWidth = 15;
+			const dataColumnWidth = 15;
+
+			let measurementsStr = '  ';
+			measurementsStr += column('version', firstColumnWidth);
+			measurements.forEach(measurement => measurementsStr += column(measurement.id, dataColumnWidth));
+			output && fs.appendFileSync(output, measurementsStr + '\n');
+			console.log(chalk.inverse(measurementsStr));
+
+			Object.keys(versions).forEach(version => {
+				const data = versions[version];
+				if (data.error) {
+					output && fs.appendFileSync(output, '  ' + column(version, firstColumnWidth) + ' ' + data.error + '\n');
+					console.log('  ', column(version, firstColumnWidth), data.error);
+				} else {
+					let rowStr = `  ${column(version, firstColumnWidth)}`;
+					measurements.forEach(measurement => {
+						const measureData = data.measurements[measurement.id];
+						const best = Object.keys(versions)
+								.map(key => versions[key])
+								.filter(other => !other.error)
+								.filter(other => other.measurements[measurement.id].median < measureData.median).length === 0;
+						let median = measureData.median.toFixed(3);
+						let str = column(median, dataColumnWidth);
+
+						if (best) {
+							str = str.replace(median, chalk.black.bgGreen(median)); // `column` counts color codes in length
+						}
+
+						rowStr += str;
+					});
+					output && fs.appendFileSync(output, chalk.stripColor(rowStr) + '\n');
+					console.log(rowStr);
+				}
+			});
+			output && fs.appendFileSync(output, '\n');
+			console.log('\n')
+		});
 	});
 }
 
@@ -320,44 +312,44 @@ function runCode() {
 		}
 
 		// time warm runs
-        let component;
+		let component;
 
-        return Promise.resolve()
-            .then(() => {
-                const t = now();
-                component = new Component({
-                    target: document.body
-                });
-                results.push({
-                    type: 'create:warm',
-                    value: now() - t
-                });
-            })
-            .then(wait)
-            .then(() => {
-                const t = now();
-                if (component.run) {
-                    component.run();
-                }
+		return Promise.resolve()
+			.then(() => {
+				const t = now();
+				component = new Component({
+					target: document.body
+				});
+				results.push({
+					type: 'create:warm',
+					value: now() - t
+				});
+			})
+			.then(wait)
+			.then(() => {
+				const t = now();
+				if (component.run) {
+					component.run();
+				}
 
-                results.push({
-                    type: 'run:warm',
-                    value: now() - t
-                });
-            })
-            .then(wait)
-            .then(() => {
-                const t = now();
-                if (component.destroy) {
-                    component.destroy();
-                } else {
-                    component.teardown();
-                }
-                results.push({
-                    type: 'destroy:warm',
-                    value: now() - t
-                });
-            });
+				results.push({
+					type: 'run:warm',
+					value: now() - t
+				});
+			})
+			.then(wait)
+			.then(() => {
+				const t = now();
+				if (component.destroy) {
+					component.destroy();
+				} else {
+					component.teardown();
+				}
+				results.push({
+					type: 'destroy:warm',
+					value: now() - t
+				});
+			});
 	}
 
 	runCold()
